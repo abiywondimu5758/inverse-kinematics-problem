@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -9,51 +10,42 @@ from IPython.display import HTML
 from matplotlib import rc
 
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout
 from sklearn.preprocessing import StandardScaler
 
 # --- Helper: forward kinematics ---
 def forward_kinematics(joint_angles, link_lengths):
-    """
-    Computes the positions of each joint in a simple 3D robotic arm.
-    """
     x0, y0, z0 = 0, 0, 0
     positions = [(x0, y0, z0)]
-    
     theta1 = joint_angles[0]
     x1 = x0 + link_lengths[0] * np.cos(theta1)
     y1 = y0 + link_lengths[0] * np.sin(theta1)
     z1 = z0
     positions.append((x1, y1, z1))
-    
     theta2 = joint_angles[1]
     x2 = x1 + link_lengths[1] * np.cos(theta1) * np.cos(theta2)
     y2 = y1 + link_lengths[1] * np.sin(theta1) * np.cos(theta2)
     z2 = z1 + link_lengths[1] * np.sin(theta2)
     positions.append((x2, y2, z2))
-    
     theta3 = joint_angles[2]
     x3 = x2 + link_lengths[2] * np.cos(theta1) * np.cos(theta2 + theta3)
     y3 = y2 + link_lengths[2] * np.sin(theta1) * np.cos(theta2 + theta3)
     z3 = z2 + link_lengths[2] * np.sin(theta2 + theta3)
     positions.append((x3, y3, z3))
-    
     return np.array(positions)
 
 # --- Load dataset ---
 st.header("Dataset and Training")
 @st.cache_data(show_spinner=True)
 def load_data():
-    # === Train set ===
-    df_LTrain_x = pd.read_csv('arkomadataset/LeftArmDataset/LTrain_x.csv')
-    df_LTrain_y = pd.read_csv('arkomadataset/LeftArmDataset/LTrain_y.csv')
-    # === Validation set ===
-    df_LVal_x = pd.read_csv('arkomadataset/LeftArmDataset/LVal_x.csv')
-    df_LVal_y = pd.read_csv('arkomadataset/LeftArmDataset/LVal_y.csv')
-    # === Test set ===
-    df_LTest_x = pd.read_csv('arkomadataset/LeftArmDataset/LTest_x.csv')
-    df_LTest_y = pd.read_csv('arkomadataset/LeftArmDataset/LTest_y.csv')
+    # Update the paths as needed
+    df_LTrain_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_x.csv")
+    df_LTrain_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_y.csv")
+    df_LVal_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_x.csv")
+    df_LVal_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_y.csv")
+    df_LTest_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_x.csv")
+    df_LTest_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_y.csv")
     return df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y
 
 df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y = load_data()
@@ -85,56 +77,63 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
-# --- Build Model ---
-st.subheader("Neural Network Model")
-model = Sequential([
-    Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-    Dense(64, activation='relu'),
-    Dropout(0.2),  # Helps combat overfitting
-    Dense(32, activation='relu'),
-    Dense(y_train_scaled.shape[1], activation='linear')
-])
-model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-
-# Capture and display the model summary
-model_summary = StringIO()
-model.summary(print_fn=lambda x: model_summary.write(x + "\n"))
-st.text(model_summary.getvalue())
-
-# --- Train Model ---
-st.info("Training model... (this might take a while)")
-history = model.fit(
-    X_train_scaled, y_train_scaled,
-    epochs=200,
-    batch_size=64,
-    validation_data=(X_val_scaled, y_val_scaled),
-    shuffle=True,
-    verbose=0
-)
-st.success("Training completed.")
-
-# --- Evaluate Model ---
-test_loss, test_mae = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
-st.write("Test MSE:", test_loss)
-st.write("Test MAE:", test_mae)
+# --- Build/Load Model ---
+MODEL_PATH = "model_trained.h5"
+if os.path.exists(MODEL_PATH):
+    model = load_model(MODEL_PATH, custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
+    st.success("Loaded saved model.")
+else:
+    st.subheader("Neural Network Model")
+    model = Sequential([
+        Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+        Dense(64, activation='relu'),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(y_train_scaled.shape[1], activation='linear')
+    ])
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    model_summary = StringIO()
+    model.summary(print_fn=lambda x: model_summary.write(x + "\n"))
+    st.text(model_summary.getvalue())
+    st.info("Training model... (this might take a while)")
+    history = model.fit(
+        X_train_scaled, y_train_scaled,
+        epochs=200,
+        batch_size=64,
+        validation_data=(X_val_scaled, y_val_scaled),
+        shuffle=True,
+        verbose=0
+    )
+    model.save(MODEL_PATH)
+    st.success("Training completed and model saved.")
+    # --- Evaluate Model ---
+    test_loss, test_mae = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
+    st.write("Test MSE:", test_loss)
+    st.write("Test MAE:", test_mae)
 
 # --- Plot Training History ---
-fig1, ax = plt.subplots(1, 2, figsize=(12,5))
-ax[0].plot(history.history['loss'], label='Train Loss')
-ax[0].plot(history.history['val_loss'], label='Val Loss')
-ax[0].set_title('Model Loss (MSE)')
-ax[0].set_xlabel('Epoch')
-ax[0].set_ylabel('Loss')
-ax[0].legend()
-
-ax[1].plot(history.history['mae'], label='Train MAE')
-ax[1].plot(history.history['val_mae'], label='Val MAE')
-ax[1].set_title('Model Mean Absolute Error')
-ax[1].set_xlabel('Epoch')
-ax[1].set_ylabel('MAE')
-ax[1].legend()
-
-st.pyplot(fig1)
+if 'history' in locals():
+    fig1, ax = plt.subplots(1, 2, figsize=(12,5))
+    ax[0].plot(history.history['loss'], label='Train Loss')
+    ax[0].plot(history.history['val_loss'], label='Val Loss')
+    ax[0].set_title('Model Loss (MSE)')
+    ax[0].set_xlabel('Epoch')
+    ax[0].set_ylabel('Loss')
+    ax[0].legend()
+    
+    ax[1].plot(history.history['mae'], label='Train MAE')
+    ax[1].plot(history.history['val_mae'], label='Val MAE')
+    ax[1].set_title('Model Mean Absolute Error')
+    ax[1].set_xlabel('Epoch')
+    ax[1].set_ylabel('MAE')
+    ax[1].legend()
+    
+    # Save the plot as an image
+    plt.savefig("training_history.png")
+    st.pyplot(fig1)
+    st.image("training_history.png", caption="Training History (Live)")
+else:
+    st.image("training_history.png", caption="Training History (Loaded Model)")
 
 # --- Create a sequence of NN predictions from test set ---
 num_frames_test = 100
