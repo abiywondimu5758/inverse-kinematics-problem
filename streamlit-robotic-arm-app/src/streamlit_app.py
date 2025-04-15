@@ -14,26 +14,134 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout
 from sklearn.preprocessing import StandardScaler
 
+
+
 # --- Helper: forward kinematics ---
 def forward_kinematics(joint_angles, link_lengths):
     x0, y0, z0 = 0, 0, 0
     positions = [(x0, y0, z0)]
+    
+    # Joint 1
     theta1 = joint_angles[0]
     x1 = x0 + link_lengths[0] * np.cos(theta1)
     y1 = y0 + link_lengths[0] * np.sin(theta1)
     z1 = z0
     positions.append((x1, y1, z1))
+    
+    # Joint 2
     theta2 = joint_angles[1]
     x2 = x1 + link_lengths[1] * np.cos(theta1) * np.cos(theta2)
     y2 = y1 + link_lengths[1] * np.sin(theta1) * np.cos(theta2)
     z2 = z1 + link_lengths[1] * np.sin(theta2)
     positions.append((x2, y2, z2))
+    
+    # Joint 3
     theta3 = joint_angles[2]
     x3 = x2 + link_lengths[2] * np.cos(theta1) * np.cos(theta2 + theta3)
     y3 = y2 + link_lengths[2] * np.sin(theta1) * np.cos(theta2 + theta3)
     z3 = z2 + link_lengths[2] * np.sin(theta2 + theta3)
     positions.append((x3, y3, z3))
+    
+    # Joint 4
+    theta4 = joint_angles[3]
+    cumulative_angle_4 = theta2 + theta3 + theta4
+    x4 = x3 + link_lengths[3] * np.cos(theta1) * np.cos(cumulative_angle_4)
+    y4 = y3 + link_lengths[3] * np.sin(theta1) * np.cos(cumulative_angle_4)
+    z4 = z3 + link_lengths[3] * np.sin(cumulative_angle_4)
+    positions.append((x4, y4, z4))
+    
+    # Joint 5
+    theta5 = joint_angles[4]
+    cumulative_angle_5 = cumulative_angle_4 + theta5
+    x5 = x4 + link_lengths[4] * np.cos(theta1) * np.cos(cumulative_angle_5)
+    y5 = y4 + link_lengths[4] * np.sin(theta1) * np.cos(cumulative_angle_5)
+    z5 = z4 + link_lengths[4] * np.sin(cumulative_angle_5)
+    positions.append((x5, y5, z5))
+    
     return np.array(positions)
+
+# NEW: Differentiable forward kinematics for 5-DOF arm using TensorFlow
+def forward_kinematics_tf_5(joint_angles, link_lengths):
+    """
+    Computes the end-effector position for a 5-DOF robotic arm.
+    joint_angles: Tensor of shape [batch, 5]
+    link_lengths: list of 5 link lengths
+    Returns: Tensor of shape [batch, 3] representing (x, y, z)
+    """
+    theta1 = joint_angles[:, 0]
+    theta2 = joint_angles[:, 1]
+    theta3 = joint_angles[:, 2]
+    theta4 = joint_angles[:, 3]
+    theta5 = joint_angles[:, 4]
+    
+    x0 = tf.zeros_like(theta1)
+    y0 = tf.zeros_like(theta1)
+    z0 = tf.zeros_like(theta1)
+    
+    x1 = x0 + link_lengths[0] * tf.cos(theta1)
+    y1 = y0 + link_lengths[0] * tf.sin(theta1)
+    z1 = z0
+    
+    x2 = x1 + link_lengths[1] * tf.cos(theta1) * tf.cos(theta2)
+    y2 = y1 + link_lengths[1] * tf.sin(theta1) * tf.cos(theta2)
+    z2 = z1 + link_lengths[1] * tf.sin(theta2)
+    
+    x3 = x2 + link_lengths[2] * tf.cos(theta1) * tf.cos(theta2+theta3)
+    y3 = y2 + link_lengths[2] * tf.sin(theta1) * tf.cos(theta2+theta3)
+    z3 = z2 + link_lengths[2] * tf.sin(theta2+theta3)
+    
+    x4 = x3 + link_lengths[3] * tf.cos(theta1) * tf.cos(theta2+theta3+theta4)
+    y4 = y3 + link_lengths[3] * tf.sin(theta1) * tf.cos(theta2+theta3+theta4)
+    z4 = z3 + link_lengths[3] * tf.sin(theta2+theta3+theta4)
+    
+    x5 = x4 + link_lengths[4] * tf.cos(theta1) * tf.cos(theta2+theta3+theta4+theta5)
+    y5 = y4 + link_lengths[4] * tf.sin(theta1) * tf.cos(theta2+theta3+theta4+theta5)
+    z5 = z4 + link_lengths[4] * tf.sin(theta2+theta3+theta4+theta5)
+    
+    return tf.stack([x5, y5, z5], axis=1)  # shape: [batch, 3]
+
+# NEW: Custom PINN model for 5-DOF outputs with physics loss
+class PINNModel(tf.keras.Model):
+    def __init__(self, link_lengths, lambda_phys=0.1, **kwargs):
+        super(PINNModel, self).__init__(**kwargs)
+        self.link_lengths = link_lengths  # list of 5 link lengths
+        self.lambda_phys = lambda_phys    # weight for physics loss
+        self.d1 = tf.keras.layers.Dense(64, activation='relu')
+        self.d2 = tf.keras.layers.Dense(64, activation='relu')
+        self.dropout = tf.keras.layers.Dropout(0.2)
+        self.d3 = tf.keras.layers.Dense(32, activation='relu')
+        self.out_layer = tf.keras.layers.Dense(5, activation='linear')  # output 5 joint angles
+    def call(self, inputs, training=False):
+        x = self.d1(inputs)
+        x = self.d2(x)
+        if training:
+            x = self.dropout(x, training=training)
+        x = self.d3(x)
+        return self.out_layer(x)
+    def train_step(self, data):
+        x, y = data  # x: input features, y: ground truth joint angles with shape [batch, 5]
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)
+            loss_data = tf.reduce_mean(tf.square(y - y_pred))
+            pred_positions = forward_kinematics_tf_5(y_pred, self.link_lengths)
+            target_positions = x[:, :3]  # assume x[:, :3] holds target end-effector positions
+            loss_phys = tf.reduce_mean(tf.square(target_positions - pred_positions))
+            loss = loss_data + self.lambda_phys * loss_phys
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        return {"loss": loss, "data_loss": loss_data, "phys_loss": loss_phys}
+    def get_config(self):
+        config = super(PINNModel, self).get_config()
+        config.update({
+            "link_lengths": self.link_lengths,
+            "lambda_phys": self.lambda_phys
+        })
+        return config
+    @classmethod
+    def from_config(cls, config):
+        link_lengths = config.pop("link_lengths", [1.0, 1.0, 0.8, 0.5, 0.3])
+        lambda_phys = config.pop("lambda_phys", 0.1)
+        return cls(link_lengths, lambda_phys, **config)
 
 # --- Load dataset ---
 st.header("Dataset and Training")
@@ -64,6 +172,7 @@ y_val = df_LVal_y.values
 X_test = df_LTest_x.values
 y_test = df_LTest_y.values
 
+
 # --- Scale Data ---
 scaler_X = StandardScaler()
 scaler_y = StandardScaler()
@@ -77,39 +186,60 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
+# --- Model Selection ---
+st.sidebar.header("Model Selection")
+model_type = st.sidebar.selectbox("Select Model Type", ["Neural Network", "PINN"])
+
 # --- Build/Load Model ---
-MODEL_PATH = "model_trained.h5"
-if os.path.exists(MODEL_PATH):
-    model = load_model(MODEL_PATH, custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
-    st.success("Loaded saved model.")
-else:
-    st.subheader("Neural Network Model")
-    model = Sequential([
-        Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-        Dense(64, activation='relu'),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(y_train_scaled.shape[1], activation='linear')
-    ])
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-    model_summary = StringIO()
-    model.summary(print_fn=lambda x: model_summary.write(x + "\n"))
-    st.text(model_summary.getvalue())
-    st.info("Training model... (this might take a while)")
-    history = model.fit(
-        X_train_scaled, y_train_scaled,
-        epochs=200,
-        batch_size=64,
-        validation_data=(X_val_scaled, y_val_scaled),
-        shuffle=True,
-        verbose=0
-    )
-    model.save(MODEL_PATH)
-    st.success("Training completed and model saved.")
-    # --- Evaluate Model ---
-    test_loss, test_mae = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
-    st.write("Test MSE:", test_loss)
-    st.write("Test MAE:", test_mae)
+if model_type == "Neural Network":
+    MODEL_PATH = "model_trained.h5"
+    if os.path.exists(MODEL_PATH):
+        model = load_model(MODEL_PATH, custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
+        st.success("Loaded saved Neural Network model.")
+    else:
+        st.subheader("Neural Network Model")
+        model = Sequential([
+            Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+            Dense(64, activation='relu'),
+            Dropout(0.2),
+            Dense(32, activation='relu'),
+            Dense(5, activation='linear')
+        ])
+        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+        model_summary = StringIO()
+        model.summary(print_fn=lambda x: model_summary.write(x + "\n"))
+        st.text(model_summary.getvalue())
+        st.info("Training Neural Network model... (this might take a while)")
+        history = model.fit(X_train_scaled, y_train_scaled,
+                            epochs=200, batch_size=64,
+                            validation_data=(X_val_scaled, y_val_scaled),
+                            shuffle=True, verbose=0)
+        model.save(MODEL_PATH)
+        st.success("Neural Network training completed and model saved.")
+        test_loss, test_mae = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
+        st.write("Test MSE:", test_loss)
+        st.write("Test MAE:", test_mae)
+else:  # PINN model selected
+    PINN_MODEL_PATH = "pinn_model.keras"  # use a '.keras' extension for native Keras format
+    if os.path.exists(PINN_MODEL_PATH):
+        model = load_model(PINN_MODEL_PATH,
+                           custom_objects={"PINNModel": PINNModel, "forward_kinematics_tf_5": forward_kinematics_tf_5},
+                           safe_mode=False)
+        st.success("Loaded saved PINN model.")
+    else:
+        st.subheader("PINN Model Training")
+        # Define link lengths for 5-DOF arm
+        link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]
+        model = PINNModel(link_lengths=link_lengths, lambda_phys=0.1)
+        model.build((None, X_train_scaled.shape[1]))  # Ensure model is built before training
+        model.compile(optimizer='adam', loss=lambda y_true, y_pred: tf.constant(0.0))
+        st.info("Training PINN model... (this may take a while)")
+        history_pinn = model.fit(X_train_scaled, y_train_scaled,
+                                 epochs=200, batch_size=64,
+                                 validation_data=(X_val_scaled, y_val_scaled),
+                                 verbose=0)
+        model.save(PINN_MODEL_PATH)  # now saved with valid extension
+        st.success("PINN training completed and model saved.")
 
 # --- Plot Training History ---
 if 'history' in locals():
@@ -131,7 +261,6 @@ if 'history' in locals():
     # Save the plot as an image
     plt.savefig("training_history.png")
     st.pyplot(fig1)
-    st.image("training_history.png", caption="Training History (Live)")
 else:
     st.image("training_history.png", caption="Training History (Loaded Model)")
 
@@ -142,14 +271,14 @@ for i in range(num_frames_test):
     x_input = X_test_scaled[i].reshape(1, -1)
     pred_scaled = model.predict(x_input, verbose=0)
     pred = scaler_y.inverse_transform(pred_scaled)[0]
-    joint_angles = pred[:3]
+    joint_angles = pred[:5]  # Updated to use five joints
     angles_sequence_nn.append(joint_angles)
 angles_sequence_nn = np.array(angles_sequence_nn)
 st.write("NN-generated angles sequence shape:", angles_sequence_nn.shape)
 
 # --- Animation using NN predictions ---
 st.subheader("Robotic Arm Simulation with NN Predictions")
-link_lengths = [1.0, 1.0, 0.8]
+link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]  # Updated to five links
 
 fig2 = plt.figure()
 ax2 = fig2.add_subplot(111, projection='3d')
@@ -186,25 +315,27 @@ ani_html = ani.to_jshtml()
 st.components.v1.html(ani_html, height=600)
 
 # --- User Input Simulation via Streamlit ---
-st.sidebar.header("Input Parameters for Simulation")
-x_val = st.sidebar.number_input("X:", value=0.0)
-y_val = st.sidebar.number_input("Y:", value=0.0)
-z_val = st.sidebar.number_input("Z:", value=0.0)
-roll_val = st.sidebar.number_input("Roll:", value=0.0)
-pitch_val = st.sidebar.number_input("Pitch:", value=0.0)
-yaw_val = st.sidebar.number_input("Yaw:", value=0.0)
+with st.sidebar.form(key="simulation_form"):
+    st.sidebar.header("Input Parameters for Simulation")
+    x_val = st.number_input("X:", value=0.0)
+    y_val = st.number_input("Y:", value=0.0)
+    z_val = st.number_input("Z:", value=0.0)
+    roll_val = st.number_input("Roll:", value=0.0)
+    pitch_val = st.number_input("Pitch:", value=0.0)
+    yaw_val = st.number_input("Yaw:", value=0.0)
+    submit_sim = st.form_submit_button("Simulate Robotic Arm")
 
-if st.sidebar.button("Simulate Robotic Arm"):
+if submit_sim:
     # Prepare target input and prediction
     target_input = np.array([[x_val, y_val, z_val, roll_val, pitch_val, yaw_val]])
     target_input_scaled = scaler_X.transform(target_input)
     pred_scaled = model.predict(target_input_scaled, verbose=0)
     pred = scaler_y.inverse_transform(pred_scaled)[0]
-    target_joint_angles = pred[:3]
-    st.write("Predicted Joint Angles (first three):", target_joint_angles)
+    target_joint_angles = pred[:5]  # Updated to use five joints
+    st.write("Predicted Joint Angles (all five):", target_joint_angles)
     
     # Create trajectory
-    start_joint_angles = np.array([0.0, 0.0, 0.0])
+    start_joint_angles = np.zeros(5)  # Updated to five joints
     num_frames_sim = 50
     trajectory = np.linspace(start_joint_angles, target_joint_angles, num_frames_sim)
     
@@ -219,10 +350,12 @@ if st.sidebar.button("Simulate Robotic Arm"):
     ax3.set_title("Robotic Arm Animation to Target")
 
     line_sim, = ax3.plot([], [], [], 'o-', lw=4)
+    
     def init_sim():
         line_sim.set_data([], [])
         line_sim.set_3d_properties([])
         return (line_sim,)
+    
     def animate_sim(i):
         joint_angles = trajectory[i]
         positions = forward_kinematics(joint_angles, link_lengths)
@@ -260,9 +393,9 @@ def simulate_tkinter():
         target_input_scaled = scaler_X.transform(target_input)
         pred_scaled = model.predict(target_input_scaled, verbose=0)
         pred = scaler_y.inverse_transform(pred_scaled)[0]
-        target_joint_angles = pred[:3]
+        target_joint_angles = pred[:5]  # Updated to use five joints
         print("Predicted joint angles:", target_joint_angles)
-        start_joint_angles = np.array([0.0, 0.0, 0.0])
+        start_joint_angles = np.zeros(5)  # Updated to five joints
         num_frames_local = 50
         trajectory = np.linspace(start_joint_angles, target_joint_angles, num_frames_local)
         
