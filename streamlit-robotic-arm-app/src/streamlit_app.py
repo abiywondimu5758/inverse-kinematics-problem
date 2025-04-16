@@ -408,7 +408,7 @@ def simulate_pybullet(joint_angles, link_lengths):
         p.resetJointState(robotId, i, joint_angles[i])
     
     # Run the simulation for ~1 second (240 steps at 240Hz)
-    for _ in range(240):
+    for _ in range(2400):
         p.stepSimulation()
         time.sleep(1./240.)
     
@@ -636,7 +636,6 @@ with st.sidebar.form(key="simulation_form"):
     yaw_val = st.number_input("Yaw:", value=0.0)
     submit_sim = st.form_submit_button("Simulate Robotic Arm")
 
-print("whatatatttaeetwetwet",type(submit_sim))
 # Visualization code moved here after model build/load
 if viz_mode == "PyBullet" and not submit_sim:
     st.info("Running PyBullet simulation...")
