@@ -8,12 +8,20 @@ import matplotlib.animation as animation
 from io import StringIO
 from IPython.display import HTML
 from matplotlib import rc
+import imageio  # new import for GIF creation
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout
 from sklearn.preprocessing import StandardScaler
 
+
+# For pybullet
+import pybullet as p
+import pybullet_data
+import time
+import tempfile
+import os
 
 
 # --- Helper: forward kinematics ---
@@ -143,6 +151,11 @@ class PINNModel(tf.keras.Model):
         lambda_phys = config.pop("lambda_phys", 0.1)
         return cls(link_lengths, lambda_phys, **config)
 
+# New: Helper function for zero loss
+@tf.keras.utils.register_keras_serializable(package="Custom", name="zero_loss")
+def zero_loss(y_true, y_pred):
+    return tf.constant(0.0)
+
 # --- Load dataset ---
 st.header("Dataset and Training")
 @st.cache_data(show_spinner=True)
@@ -186,9 +199,228 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
+def generate_nao_left_arm_urdf(joint_angles, link_lengths):
+    """
+    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
+    The joints are assumed in order:
+      1. LShoulderPitch (rotation around z)
+      2. LShoulderRoll  (rotation around y)
+      3. LElbowYaw      (rotation around z)
+      4. LElbowRoll     (rotation around y)
+      5. LWristYaw      (rotation around z)
+    For simplicity, each link is represented by a small box.
+    
+    Parameters:
+        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
+        link_lengths: list/array of link lengths for each segment
+        
+    Returns:
+        A string containing the URDF.
+    """
+    # For simplicity, we use box geometry with a fixed size based on each link length
+    # You can refine the geometry details as needed.
+    urdf = """<?xml version="1.0" ?>
+<robot name="nao_left_arm">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+  </link>
+"""
+    # Joint 1: LShoulderPitch
+    urdf += f"""
+  <link name="LShoulderPitch_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[0]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderPitch_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="LShoulderPitch_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 2: LShoulderRoll
+    urdf += f"""
+  <link name="LShoulderRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[1]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderRoll_joint" type="revolute">
+    <parent link="LShoulderPitch_link"/>
+    <child link="LShoulderRoll_link"/>
+    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 3: LElbowYaw
+    urdf += f"""
+  <link name="LElbowYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[2]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowYaw_joint" type="revolute">
+    <parent link="LShoulderRoll_link"/>
+    <child link="LElbowYaw_link"/>
+    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 4: LElbowRoll
+    urdf += f"""
+  <link name="LElbowRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[3]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowRoll_joint" type="revolute">
+    <parent link="LElbowYaw_link"/>
+    <child link="LElbowRoll_link"/>
+    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 5: LWristYaw
+    urdf += f"""
+  <link name="LWristYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[4]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LWristYaw_joint" type="revolute">
+    <parent link="LElbowRoll_link"/>
+    <child link="LWristYaw_link"/>
+    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
+  </joint>
+</robot>
+"""
+    return urdf
+
+def simulate_pybullet_trajectory(trajectory, link_lengths):
+    """
+    Animate the NAO left arm in PyBullet along a given trajectory using motor control.
+    
+    Parameters:
+        trajectory: np.array of shape (num_frames, 5) representing the sequence
+                    of joint angles for the left arm.
+        link_lengths: list of 5 link lengths.
+    """
+    # Disconnect if any active connection is present
+    if p.isConnected():
+        p.disconnect()
+    physicsClient = p.connect(p.GUI)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setGravity(0, 0, -9.81)
+    planeId = p.loadURDF("plane.urdf")
+    
+    # Use the first frame's joint angles to generate the URDF.
+    initial_angles = trajectory[0]
+    urdf_text = generate_nao_left_arm_urdf(initial_angles, link_lengths)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
+        tmp_file.write(urdf_text.encode("utf-8"))
+        tmp_file_path = tmp_file.name
+
+    start_pos = [0, 0, 0.1]
+    start_orientation = p.getQuaternionFromEuler([0, 0, 0])
+    robotId = p.loadURDF(tmp_file_path, start_pos, start_orientation, useFixedBase=True)
+    
+    num_joints = p.getNumJoints(robotId)
+    
+    # Enable position control for joints
+    for i in range(min(5, num_joints)):
+        p.setJointMotorControl2(robotId, i, controlMode=p.POSITION_CONTROL, targetPosition=initial_angles[i])
+    
+    # Animate the robot along the trajectory
+    # Here, for each frame in the trajectory, we set the target positions,
+    # then run several simulation steps to allow the joints to move.
+    steps_per_frame = 50  # Increase if you want slower motion
+    for frame in trajectory:
+        for i in range(min(5, num_joints)):
+            p.setJointMotorControl2(robotId, i, controlMode=p.POSITION_CONTROL, targetPosition=frame[i])
+        # Run simulation for a few steps so the joints can approach the target
+        for _ in range(steps_per_frame):
+            p.stepSimulation()
+            time.sleep(1./240.)
+    
+    st.success("PyBullet trajectory simulation completed. Close the PyBullet window to return.")
+    p.disconnect()
+    os.unlink(tmp_file_path)
+
+
+def simulate_pybullet(joint_angles, link_lengths):
+    """
+    Simulate the NAO left arm in PyBullet using a custom URDF.
+    
+    Parameters:
+        joint_angles: list/array of 5 joint angles for the left arm.
+        link_lengths: list/array of 5 link lengths.
+    """
+    # Ensure any active connection is closed before starting a new GUI connection
+    if p.isConnected():
+        p.disconnect()
+    physicsClient = p.connect(p.GUI)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setGravity(0, 0, -9.81)
+    planeId = p.loadURDF("plane.urdf")
+    
+    # Write our custom URDF to a temporary file
+    urdf_text = generate_nao_left_arm_urdf(joint_angles, link_lengths)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
+        tmp_file.write(urdf_text.encode("utf-8"))
+        tmp_file_path = tmp_file.name
+
+    start_pos = [0, 0, 0.1]
+    start_orientation = p.getQuaternionFromEuler([0, 0, 0])
+    
+    # Load our custom NAO left arm URDF
+    robotId = p.loadURDF(tmp_file_path, start_pos, start_orientation, useFixedBase=True)
+    
+    # Set joint states for the first 5 joints (assumes the URDF joints are defined in order)
+    num_joints = p.getNumJoints(robotId)
+    for i in range(min(5, num_joints)):
+        p.resetJointState(robotId, i, joint_angles[i])
+    
+    # Run the simulation for ~1 second (240 steps at 240Hz)
+    for _ in range(240):
+        p.stepSimulation()
+        time.sleep(1./240.)
+    
+    st.success("PyBullet simulation completed. Close the PyBullet window to return.")
+    p.disconnect()
+    os.unlink(tmp_file_path)
+
 # --- Model Selection ---
 st.sidebar.header("Model Selection")
 model_type = st.sidebar.selectbox("Select Model Type", ["Neural Network", "PINN"])
+st.sidebar.header("Visualiser Selection")
+viz_mode = st.sidebar.selectbox("Select Visualization Mode", ["Matplotlib", "PyBullet"])
 
 # --- Build/Load Model ---
 if model_type == "Neural Network":
@@ -216,9 +448,6 @@ if model_type == "Neural Network":
                             shuffle=True, verbose=0)
         model.save(MODEL_PATH)
         st.success("Neural Network training completed and model saved.")
-        test_loss, test_mae = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
-        st.write("Test MSE:", test_loss)
-        st.write("Test MAE:", test_mae)
 else:  # PINN model selected
     PINN_MODEL_PATH = "pinn_model.keras"  # use a '.keras' extension for native Keras format
     if os.path.exists(PINN_MODEL_PATH):
@@ -232,7 +461,7 @@ else:  # PINN model selected
         link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]
         model = PINNModel(link_lengths=link_lengths, lambda_phys=0.1)
         model.build((None, X_train_scaled.shape[1]))  # Ensure model is built before training
-        model.compile(optimizer='adam', loss=lambda y_true, y_pred: tf.constant(0.0))
+        model.compile(optimizer='adam', loss=zero_loss, metrics=['mae'])
         st.info("Training PINN model... (this may take a while)")
         history_pinn = model.fit(X_train_scaled, y_train_scaled,
                                  epochs=200, batch_size=64,
@@ -240,6 +469,84 @@ else:  # PINN model selected
                                  verbose=0)
         model.save(PINN_MODEL_PATH)  # now saved with valid extension
         st.success("PINN training completed and model saved.")
+
+
+# Insert common evaluation snippet for both model types
+if model_type == "PINN":
+    # Custom evaluation for PINN, since the compiled loss is zero.
+    y_pred = model.predict(X_test_scaled, verbose=0)
+    test_loss = np.mean(np.square(y_test_scaled - y_pred))
+    test_mae = np.mean(np.abs(y_test_scaled - y_pred))
+else:
+    evaluation = model.evaluate(X_test_scaled, y_test_scaled, verbose=0)
+    if isinstance(evaluation, (list, tuple)):
+        test_loss, test_mae = evaluation
+    else:
+        test_loss = evaluation
+        test_mae = None
+st.write("Test MSE:", test_loss)
+if test_mae is not None:
+    st.write("Test MAE:", test_mae)
+# print("Test MSE:", test_loss)
+# if test_mae is not None:
+    # print("Test MAE:", test_mae)
+
+# --- Advanced Metrics and Visualization ---
+
+# Generate predictions in original scale
+preds_scaled = model.predict(X_test_scaled, verbose=0)
+preds = scaler_y.inverse_transform(preds_scaled)  # shape: [num_samples, 5]
+y_test_orig = scaler_y.inverse_transform(y_test_scaled)
+
+# Mean Joint Error per joint (absolute error)
+joint_errors = np.abs(y_test_orig - preds)
+mean_joint_error = np.mean(joint_errors, axis=0)
+st.write("Mean Joint Error per joint:", mean_joint_error)
+# print("Mean Joint Error per joint:", mean_joint_error)
+
+
+
+# Forward Kinematics Error: compute end-effector positions (last joint)
+link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]
+def compute_fk_for_dataset(joint_angles_array):
+    positions = []
+    for angles in joint_angles_array:
+        # Using the last computed position as the end-effector position
+        pos = forward_kinematics(angles, link_lengths)[-1]
+        positions.append(pos)
+    return np.array(positions)
+
+true_fk_positions = compute_fk_for_dataset(y_test_orig)
+pred_fk_positions = compute_fk_for_dataset(preds)
+fk_errors = np.linalg.norm(true_fk_positions - pred_fk_positions, axis=1)
+mean_fk_error = np.mean(fk_errors)
+st.write("Mean Forward Kinematics Error:", mean_fk_error)
+# print("Mean Forward Kinematics Error:", mean_fk_error)
+
+# Visualization: Scatter plots of true vs predicted joint angles for each joint
+joint_names = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5"]
+fig_scatter, axs = plt.subplots(1, 5, figsize=(20, 4))
+for i, ax in enumerate(axs):
+    ax.scatter(y_test_orig[:, i], preds[:, i], alpha=0.5)
+    ax.set_xlabel("True " + joint_names[i])
+    ax.set_ylabel("Pred " + joint_names[i])
+    ax.set_title(joint_names[i])
+    # Plot the diagonal as a reference line
+    min_val = min(y_test_orig[:, i].min(), preds[:, i].min())
+    max_val = max(y_test_orig[:, i].max(), preds[:, i].max())
+    ax.plot([min_val, max_val], [min_val, max_val], 'r--')
+plt.tight_layout()
+st.pyplot(fig_scatter)
+
+# Visualization: Overlay end-effector positions (True vs Predicted)
+fig_fk, ax_fk = plt.subplots(figsize=(6,6))
+ax_fk.scatter(true_fk_positions[:, 0], true_fk_positions[:, 1], label="True End-Effector", alpha=0.7)
+ax_fk.scatter(pred_fk_positions[:, 0], pred_fk_positions[:, 1], label="Pred End-Effector", alpha=0.7)
+ax_fk.set_xlabel("X Position")
+ax_fk.set_ylabel("Y Position")
+ax_fk.set_title("End-Effector Position Comparison")
+ax_fk.legend()
+st.pyplot(fig_fk)
 
 # --- Plot Training History ---
 if 'history' in locals():
@@ -276,43 +583,47 @@ for i in range(num_frames_test):
 angles_sequence_nn = np.array(angles_sequence_nn)
 st.write("NN-generated angles sequence shape:", angles_sequence_nn.shape)
 
+
+
+
 # --- Animation using NN predictions ---
-st.subheader("Robotic Arm Simulation with NN Predictions")
-link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]  # Updated to five links
+if viz_mode == "Matplotlib":  # Only show Matplotlib animation when selected
+    st.subheader("Robotic Arm Simulation with NN Predictions")
+    link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]  # Updated to five links
 
-fig2 = plt.figure()
-ax2 = fig2.add_subplot(111, projection='3d')
-ax2.set_xlim([-3, 3])
-ax2.set_ylim([-3, 3])
-ax2.set_zlim([-1, 3])
-ax2.set_xlabel('X')
-ax2.set_ylabel('Y')
-ax2.set_zlabel('Z')
-ax2.set_title("Robotic Arm Simulation with NN Predictions")
+    fig2 = plt.figure()
+    ax2 = fig2.add_subplot(111, projection='3d')
+    ax2.set_xlim([-3, 3])
+    ax2.set_ylim([-3, 3])
+    ax2.set_zlim([-1, 3])
+    ax2.set_xlabel('X')
+    ax2.set_ylabel('Y')
+    ax2.set_zlabel('Z')
+    ax2.set_title("Robotic Arm Simulation with NN Predictions")
 
-line, = ax2.plot([], [], [], 'o-', lw=4)
+    line, = ax2.plot([], [], [], 'o-', lw=4)
 
-def init():
-    line.set_data([], [])
-    line.set_3d_properties([])
-    return (line,)
+    def init():
+        line.set_data([], [])
+        line.set_3d_properties([])
+        return (line,)
 
-def animate(i):
-    joint_angles = angles_sequence_nn[i]
-    positions = forward_kinematics(joint_angles, link_lengths)
-    xs = positions[:, 0]
-    ys = positions[:, 1]
-    zs = positions[:, 2]
-    line.set_data(xs, ys)
-    line.set_3d_properties(zs)
-    return (line,)
+    def animate(i):
+        joint_angles = angles_sequence_nn[i]
+        positions = forward_kinematics(joint_angles, link_lengths)
+        xs = positions[:, 0]
+        ys = positions[:, 1]
+        zs = positions[:, 2]
+        line.set_data(xs, ys)
+        line.set_3d_properties(zs)
+        return (line,)
 
-ani = animation.FuncAnimation(fig2, animate, frames=len(angles_sequence_nn),
-                              init_func=init, blit=True, interval=50)
-rc('animation', html='jshtml')
-ani_html = ani.to_jshtml()
+    ani = animation.FuncAnimation(fig2, animate, frames=len(angles_sequence_nn),
+                                  init_func=init, blit=True, interval=50)
+    rc('animation', html='jshtml')
+    ani_html = ani.to_jshtml()
 
-st.components.v1.html(ani_html, height=600)
+    st.components.v1.html(ani_html, height=600)
 
 # --- User Input Simulation via Streamlit ---
 with st.sidebar.form(key="simulation_form"):
@@ -324,6 +635,14 @@ with st.sidebar.form(key="simulation_form"):
     pitch_val = st.number_input("Pitch:", value=0.0)
     yaw_val = st.number_input("Yaw:", value=0.0)
     submit_sim = st.form_submit_button("Simulate Robotic Arm")
+
+print("whatatatttaeetwetwet",type(submit_sim))
+# Visualization code moved here after model build/load
+if viz_mode == "PyBullet" and not submit_sim:
+    st.info("Running PyBullet simulation...")
+    simulate_pybullet(angles_sequence_nn[0], link_lengths=[1.0, 1.0, 0.8, 0.5, 0.3])
+    # st.image(gif_path, caption="PyBullet Simulation", use_column_width=True)
+
 
 if submit_sim:
     # Prepare target input and prediction
@@ -339,38 +658,45 @@ if submit_sim:
     num_frames_sim = 50
     trajectory = np.linspace(start_joint_angles, target_joint_angles, num_frames_sim)
     
-    fig3 = plt.figure()
-    ax3 = fig3.add_subplot(111, projection='3d')
-    ax3.set_xlim([-3, 3])
-    ax3.set_ylim([-3, 3])
-    ax3.set_zlim([-1, 3])
-    ax3.set_xlabel('X')
-    ax3.set_ylabel('Y')
-    ax3.set_zlabel('Z')
-    ax3.set_title("Robotic Arm Animation to Target")
+    if viz_mode == "Matplotlib":
+        fig3 = plt.figure()
+        ax3 = fig3.add_subplot(111, projection='3d')
+        ax3.set_xlim([-3, 3])
+        ax3.set_ylim([-3, 3])
+        ax3.set_zlim([-1, 3])
+        ax3.set_xlabel('X')
+        ax3.set_ylabel('Y')
+        ax3.set_zlabel('Z')
+        ax3.set_title("Robotic Arm Animation to Target")
 
-    line_sim, = ax3.plot([], [], [], 'o-', lw=4)
-    
-    def init_sim():
-        line_sim.set_data([], [])
-        line_sim.set_3d_properties([])
-        return (line_sim,)
-    
-    def animate_sim(i):
-        joint_angles = trajectory[i]
-        positions = forward_kinematics(joint_angles, link_lengths)
-        xs = positions[:, 0]
-        ys = positions[:, 1]
-        zs = positions[:, 2]
-        line_sim.set_data(xs, ys)
-        line_sim.set_3d_properties(zs)
-        return (line_sim,)
-    
-    ani_sim = animation.FuncAnimation(fig3, animate_sim, frames=num_frames_sim,
-                                      init_func=init_sim, blit=True, interval=50)
-    ani_sim_html = ani_sim.to_jshtml()
-    st.components.v1.html(ani_sim_html, height=600)
+        line_sim, = ax3.plot([], [], [], 'o-', lw=4)
+        
+        def init_sim():
+            line_sim.set_data([], [])
+            line_sim.set_3d_properties([])
+            return (line_sim,)
+        
+        def animate_sim(i):
+            joint_angles = trajectory[i]
+            positions = forward_kinematics(joint_angles, link_lengths)
+            xs = positions[:, 0]
+            ys = positions[:, 1]
+            zs = positions[:, 2]
+            line_sim.set_data(xs, ys)
+            line_sim.set_3d_properties(zs)
+            return (line_sim,)
+        
+        ani_sim = animation.FuncAnimation(fig3, animate_sim, frames=num_frames_sim,
+                                        init_func=init_sim, blit=True, interval=50)
+        ani_sim_html = ani_sim.to_jshtml()
+        st.components.v1.html(ani_sim_html, height=600)
+        st.sidebar.text("Simulation completed successfully.")
+
+    else:  # PyBullet visualization
+        st.info("Running PyBullet simulation along the trajectory...")
+        simulate_pybullet_trajectory(trajectory, link_lengths=[1.0, 1.0, 0.8, 0.5, 0.3])
     st.sidebar.text("Simulation completed successfully.")
+
 
 # --- Tkinter Simulation Code (Launch if desired) ---
 def simulate_tkinter():
