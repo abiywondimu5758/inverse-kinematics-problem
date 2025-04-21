@@ -10,9 +10,9 @@ from IPython.display import HTML
 from matplotlib import rc
 import imageio  # new import for GIF creation
 
-import tensorflow as tf
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Dense, Dropout
+# import tensorflow as tf
+# from tensorflow.keras.models import Sequential, load_model
+# from tensorflow.keras.layers import Dense, Dropout
 from sklearn.preprocessing import StandardScaler
 
 
@@ -199,129 +199,138 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
-def generate_nao_left_arm_urdf(joint_angles, link_lengths):
+def generate_nao_full_urdf(joint_angles=None, link_offsets=None):
     """
-    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
-    The joints are assumed in order:
-      1. LShoulderPitch (rotation around z)
-      2. LShoulderRoll  (rotation around y)
-      3. LElbowYaw      (rotation around z)
-      4. LElbowRoll     (rotation around y)
-      5. LWristYaw      (rotation around z)
-    For simplicity, each link is represented by a small box.
-    
+    Generate a mesh‑based URDF string for the entire NAO robot body.
+    All body parts (trunk, neck, limbs, pelvis) are linked with joints matching the full URDF.
+    Meshes are loaded from your local `naomesh` folder.
+
     Parameters:
-        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
-        link_lengths: list/array of link lengths for each segment
-        
+        joint_angles: optional list of initial joint angles (placeholders, not inserted into URDF)
+        link_offsets:  optional dict of offsets per joint if needed for origin adjustments
+
     Returns:
-        A string containing the URDF.
+        A string containing the full-body URDF.
     """
-    # For simplicity, we use box geometry with a fixed size based on each link length
-    # You can refine the geometry details as needed.
-    urdf = """<?xml version="1.0" ?>
-<robot name="nao_left_arm">
-  <link name="base_link">
+    mesh_dir = "C:/Users/Abiy/Desktop/DS Workshop final projects/naomesh"
+    urdf = f'''<?xml version="1.0"?>
+<robot name="nao">
+  <!-- Trunk -->
+  <link name="trunk">
     <visual>
       <geometry>
-        <box size="0.1 0.1 0.1"/>
+        <mesh filename="{mesh_dir}/ALD_Trunk_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Trunk_ps.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01"/>
+    </inertial>
   </link>
-"""
-    # Joint 1: LShoulderPitch
-    urdf += f"""
-  <link name="LShoulderPitch_link">
+
+  <!-- Neck -->
+  <link name="neck">
     <visual>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[0]}"/>
+        <mesh filename="{mesh_dir}/ALD_Neck_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
     </visual>
   </link>
-  <joint name="LShoulderPitch_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="LShoulderPitch_link"/>
+  <joint name="trunk_neck" type="fixed">
+    <parent link="trunk"/>
+    <child link="neck"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
   </joint>
-"""
-    # Joint 2: LShoulderRoll
-    urdf += f"""
-  <link name="LShoulderRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[1]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
-    </visual>
+
+  <!-- Left Arm -->
+  <link name="shoulder_left">
+    <visual><geometry><mesh filename="{mesh_dir}/ALD_Shoulder_Left_ps.stl"/></geometry></visual>
   </link>
-  <joint name="LShoulderRoll_joint" type="revolute">
-    <parent link="LShoulderPitch_link"/>
-    <child link="LShoulderRoll_link"/>
-    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 3: LElbowYaw
-    urdf += f"""
-  <link name="LElbowYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[2]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
-    </visual>
+  <joint name="trunk_shoulder_left" type="revolute"><parent link="trunk"/><child link="shoulder_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/></joint>
+
+  <link name="arm_left">
+    <visual><geometry><mesh filename="{mesh_dir}/ALD_Arm_Left_ps.stl"/></geometry></visual>
   </link>
-  <joint name="LElbowYaw_joint" type="revolute">
-    <parent link="LShoulderRoll_link"/>
-    <child link="LElbowYaw_link"/>
-    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 4: LElbowRoll
-    urdf += f"""
-  <link name="LElbowRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[3]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
-    </visual>
+  <joint name="shoulder_arm_left" type="revolute"><parent link="shoulder_left"/><child link="arm_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="elbow_left">
+    <visual><geometry><mesh filename="{mesh_dir}/ALD_Elbow_Left_ps.stl"/></geometry></visual>
   </link>
-  <joint name="LElbowRoll_joint" type="revolute">
-    <parent link="LElbowYaw_link"/>
-    <child link="LElbowRoll_link"/>
-    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 5: LWristYaw
-    urdf += f"""
-  <link name="LWristYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[4]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
-    </visual>
+  <joint name="arm_elbow_left" type="revolute"><parent link="arm_left"/><child link="elbow_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="forearm_left">
+    <visual><geometry><mesh filename="{mesh_dir}/ALD_Fixed_Arm_Left_ps.stl"/></geometry></visual>
   </link>
-  <joint name="LWristYaw_joint" type="revolute">
-    <parent link="LElbowRoll_link"/>
-    <child link="LWristYaw_link"/>
-    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
-  </joint>
+  <joint name="elbow_forearm_left" type="fixed"><parent link="elbow_left"/><child link="forearm_left"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <link name="hand_left">
+    <visual><geometry><mesh filename="{mesh_dir}/ALD_MHand_ps.stl"/></geometry></visual>
+  </link>
+  <joint name="forearm_hand_left" type="fixed"><parent link="forearm_left"/><child link="hand_left"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <!-- Right Arm -->
+  <link name="shoulder_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Shoulder_Right_ps.stl"/></geometry></visual></link>
+  <joint name="trunk_shoulder_right" type="revolute"><parent link="trunk"/><child link="shoulder_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/></joint>
+
+  <link name="arm_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Arm_Right_ps.stl"/></geometry></visual></link>
+  <joint name="shoulder_arm_right" type="revolute"><parent link="shoulder_right"/><child link="arm_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="elbow_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Elbow_Right_ps.stl"/></geometry></visual></link>
+  <joint name="arm_elbow_right" type="revolute"><parent link="arm_right"/><child link="elbow_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="forearm_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Fixed_Arm_Right_ps.stl"/></geometry></visual></link>
+  <joint name="elbow_forearm_right" type="fixed"><parent link="elbow_right"/><child link="forearm_right"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <link name="hand_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_MHand_ps.stl"/></geometry></visual></link>
+  <joint name="forearm_hand_right" type="fixed"><parent link="forearm_right"/><child link="hand_right"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <!-- Left Leg -->
+  <link name="pelvis_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Pelvis_Left_ps.stl"/></geometry></visual></link>
+  <joint name="trunk_pelvis_left" type="fixed"><parent link="trunk"/><child link="pelvis_left"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <link name="hip_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Hip_Left_ps.stl"/></geometry></visual></link>
+  <joint name="pelvis_hip_left" type="revolute"><parent link="pelvis_left"/><child link="hip_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="thigh_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Thigh_Left_ps.stl"/></geometry></visual></link>
+  <joint name="hip_thigh_left" type="revolute"><parent link="hip_left"/><child link="thigh_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="tibia_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Tibia_Left_ps.stl"/></geometry></visual></link>
+  <joint name="thigh_tibia_left" type="revolute"><parent link="thigh_left"/><child link="tibia_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="ankle_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Ankle_Left_ps.stl"/></geometry></visual></link>
+  <joint name="tibia_ankle_left" type="revolute"><parent link="tibia_left"/><child link="ankle_left"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="foot_left"><visual><geometry><mesh filename="{mesh_dir}/ALD_Foot_Left_ps.stl"/></geometry></visual></link>
+  <joint name="ankle_foot_left" type="fixed"><parent link="ankle_left"/><child link="foot_left"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <!-- Right Leg -->
+  <link name="pelvis_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Pelvis_Right_ps.stl"/></geometry></visual></link>
+  <joint name="trunk_pelvis_right" type="fixed"><parent link="trunk"/><child link="pelvis_right"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
+  <link name="hip_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Hip_Right_ps.stl"/></geometry></visual></link>
+  <joint name="pelvis_hip_right" type="revolute"><parent link="pelvis_right"/><child link="hip_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="thigh_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Thigh_Right_ps.stl"/></geometry></visual></link>
+  <joint name="hip_thigh_right" type="revolute"><parent link="hip_right"/><child link="thigh_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="tibia_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Tibia_Right_ps.stl"/></geometry></visual></link>
+  <joint name="thigh_tibia_right" type="revolute"><parent link="thigh_right"/><child link="tibia_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="ankle_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Ankle_Right_ps.stl"/></geometry></visual></link>
+  <joint name="tibia_ankle_right" type="revolute"><parent link="tibia_right"/><child link="ankle_right"/><origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/></joint>
+
+  <link name="foot_right"><visual><geometry><mesh filename="{mesh_dir}/ALD_Foot_Right_ps.stl"/></geometry></visual></link>
+  <joint name="ankle_foot_right" type="fixed"><parent link="ankle_right"/><child link="foot_right"/><origin xyz="0 0 0" rpy="0 0 0"/></joint>
+
 </robot>
-"""
+'''
     return urdf
+
 
 def simulate_pybullet_trajectory(trajectory, link_lengths):
     """
@@ -342,7 +351,7 @@ def simulate_pybullet_trajectory(trajectory, link_lengths):
     
     # Use the first frame's joint angles to generate the URDF.
     initial_angles = trajectory[0]
-    urdf_text = generate_nao_left_arm_urdf(initial_angles, link_lengths)
+    urdf_text = generate_nao_full_urdf(initial_angles, link_lengths)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
         tmp_file.write(urdf_text.encode("utf-8"))
         tmp_file_path = tmp_file.name
@@ -391,7 +400,7 @@ def simulate_pybullet(joint_angles, link_lengths):
     planeId = p.loadURDF("plane.urdf")
     
     # Write our custom URDF to a temporary file
-    urdf_text = generate_nao_left_arm_urdf(joint_angles, link_lengths)
+    urdf_text = generate_nao_full_urdf(joint_angles, link_lengths)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
         tmp_file.write(urdf_text.encode("utf-8"))
         tmp_file_path = tmp_file.name
