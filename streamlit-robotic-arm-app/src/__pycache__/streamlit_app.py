@@ -161,12 +161,12 @@ st.header("Dataset and Training")
 @st.cache_data(show_spinner=True)
 def load_data():
     # Update the paths as needed
-    df_LTrain_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_x.csv")
-    df_LTrain_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_y.csv")
-    df_LVal_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_x.csv")
-    df_LVal_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_y.csv")
-    df_LTest_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_x.csv")
-    df_LTest_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_y.csv")
+    df_LTrain_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTrain_x.csv")
+    df_LTrain_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTrain_y.csv")
+    df_LVal_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LVal_x.csv")
+    df_LVal_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LVal_y.csv")
+    df_LTest_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTest_x.csv")
+    df_LTest_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTest_y.csv")
     return df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y
 
 df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y = load_data()
@@ -199,131 +199,182 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
-def generate_nao_left_arm_urdf(joint_angles, link_lengths):
+def generate_nao_full_urdf(joint_angles=None, link_lengths=None, mesh_dir=None):
     """
-    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
-    The joints are assumed in order:
-      1. LShoulderPitch (rotation around z)
-      2. LShoulderRoll  (rotation around y)
-      3. LElbowYaw      (rotation around z)
-      4. LElbowRoll     (rotation around y)
-      5. LWristYaw      (rotation around z)
-    For simplicity, each link is represented by a small box.
-    
+    Generate a mesh-based URDF string for the entire NAO robot body.
+    All body parts (trunk, neck, limbs, pelvis) are linked with joints matching the full URDF.
+    Meshes are loaded from your local `naomesh` folder.
+
     Parameters:
-        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
-        link_lengths: list/array of link lengths for each segment
-        
+        joint_angles: optional list of initial joint angles (placeholders, not inserted into URDF)
+        link_offsets:  optional dict of offsets per joint if needed for origin adjustments
+        mesh_dir:      path to your mesh directory (absolute or added to search path)
+
     Returns:
-        A string containing the URDF.
+        A string containing the full-body URDF.
     """
-    # For simplicity, we use box geometry with a fixed size based on each link length
-    # You can refine the geometry details as needed.
-    urdf = """<?xml version="1.0" ?>
-<robot name="nao_left_arm">
-  <link name="base_link">
+    # Use default if not provided
+    mesh_dir = mesh_dir or "C:/Users/Abiy/Desktop/DSWorkshopfinalprojects/naomesh"
+
+    # Helper for adding minimal inertial tags
+    def inertial_block(mass=0.0):
+        return (
+            '    <inertial>\n'
+            '      <origin xyz="0 0 0" rpy="0 0 0"/>\n'
+            f'      <mass value="{mass}"/>\n'
+            '      <inertia ixx="0.0" ixy="0.0" ixz="0.0" '  \
+            'iyy="0.0" iyz="0.0" izz="0.0"/>\n'
+            '    </inertial>\n'
+        )
+
+    # Common limit for revolute joints
+    default_limit = (
+        '      <limit lower="-1.5708" upper="1.5708" ' \
+        'effort="5" velocity="1.0"/>\n'
+    )
+
+    urdf = f'''<?xml version="1.0"?>
+<robot name="nao">
+
+  <!-- Trunk -->
+  <link name="trunk">
     <visual>
       <geometry>
-        <box size="0.1 0.1 0.1"/>
+        <mesh filename="{mesh_dir}/ALD_Trunk_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Trunk_ps.stl"/>
+      </geometry>
+    </collision>
+    {inertial_block(mass=1.0)}
   </link>
-"""
-    # Joint 1: LShoulderPitch
-    urdf += f"""
-  <link name="LShoulderPitch_link">
+
+  <!-- Neck -->
+  <link name="neck">
     <visual>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[0]}"/>
+        <mesh filename="{mesh_dir}/ALD_Neck_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
     </visual>
+    {inertial_block()}
   </link>
-  <joint name="LShoulderPitch_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="LShoulderPitch_link"/>
+  <joint name="trunk_neck" type="fixed">
+    <parent link="trunk"/>
+    <child link="neck"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Left Arm -->
+  <link name="shoulder_left">
+    <visual>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Shoulder_Left_ps.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Shoulder_Left_ps.stl"/>
+      </geometry>
+    </collision>
+    {inertial_block()}
+  </link>
+  <joint name="trunk_shoulder_left" type="revolute">
+    <parent link="trunk"/>
+    <child link="shoulder_left"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 2: LShoulderRoll
-    urdf += f"""
-  <link name="LShoulderRoll_link">
+{default_limit}  </joint>
+
+  <link name="arm_left">
     <visual>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[1]}"/>
+        <mesh filename="{mesh_dir}/ALD_Arm_Left_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Arm_Left_ps.stl"/>
+      </geometry>
+    </collision>
+    {inertial_block()}
   </link>
-  <joint name="LShoulderRoll_joint" type="revolute">
-    <parent link="LShoulderPitch_link"/>
-    <child link="LShoulderRoll_link"/>
-    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
+  <joint name="shoulder_arm_left" type="revolute">
+    <parent link="shoulder_left"/>
+    <child link="arm_left"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 3: LElbowYaw
-    urdf += f"""
-  <link name="LElbowYaw_link">
+{default_limit}  </joint>
+
+  <link name="elbow_left">
     <visual>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[2]}"/>
+        <mesh filename="{mesh_dir}/ALD_Elbow_Left_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
     </visual>
-  </link>
-  <joint name="LElbowYaw_joint" type="revolute">
-    <parent link="LShoulderRoll_link"/>
-    <child link="LElbowYaw_link"/>
-    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 4: LElbowRoll
-    urdf += f"""
-  <link name="LElbowRoll_link">
-    <visual>
+    <collision>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[3]}"/>
+        <mesh filename="{mesh_dir}/ALD_Elbow_Left_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
-    </visual>
+    </collision>
+    {inertial_block()}
   </link>
-  <joint name="LElbowRoll_joint" type="revolute">
-    <parent link="LElbowYaw_link"/>
-    <child link="LElbowRoll_link"/>
-    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
+  <joint name="arm_elbow_left" type="revolute">
+    <parent link="arm_left"/>
+    <child link="elbow_left"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 5: LWristYaw
-    urdf += f"""
-  <link name="LWristYaw_link">
+{default_limit}  </joint>
+
+  <link name="forearm_left">
     <visual>
       <geometry>
-        <box size="0.05 0.05 {link_lengths[4]}"/>
+        <mesh filename="{mesh_dir}/ALD_Fixed_Arm_Left_ps.stl"/>
       </geometry>
-      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_Fixed_Arm_Left_ps.stl"/>
+      </geometry>
+    </collision>
+    {inertial_block()}
   </link>
-  <joint name="LWristYaw_joint" type="revolute">
-    <parent link="LElbowRoll_link"/>
-    <child link="LWristYaw_link"/>
-    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
+  <joint name="elbow_forearm_left" type="fixed">
+    <parent link="elbow_left"/>
+    <child link="forearm_left"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
+
+  <link name="hand_left">
+    <visual>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_MHand_ps.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="{mesh_dir}/ALD_MHand_ps.stl"/>
+      </geometry>
+    </collision>
+    {inertial_block()}
+  </link>
+  <joint name="forearm_hand_left" type="fixed">
+    <parent link="forearm_left"/>
+    <child link="hand_left"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Repeat similarly for Right Arm, Legs, etc., with inertial_block() on each link and default_limit on revolute joints -->
+
 </robot>
-"""
+'''
     return urdf
 
+
+
 def simulate_pybullet_trajectory(trajectory, link_lengths):
+    print("Simulating PyBullet trajectory...")
     """
     Animate the NAO left arm in PyBullet along a given trajectory using motor control.
     
@@ -342,7 +393,7 @@ def simulate_pybullet_trajectory(trajectory, link_lengths):
     
     # Use the first frame's joint angles to generate the URDF.
     initial_angles = trajectory[0]
-    urdf_text = generate_nao_left_arm_urdf(initial_angles, link_lengths)
+    urdf_text = generate_nao_full_urdf(initial_angles, link_lengths)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
         tmp_file.write(urdf_text.encode("utf-8"))
         tmp_file_path = tmp_file.name
@@ -386,12 +437,16 @@ def simulate_pybullet(joint_angles, link_lengths):
     if p.isConnected():
         p.disconnect()
     physicsClient = p.connect(p.GUI)
+
+
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
+
     planeId = p.loadURDF("plane.urdf")
     
+
     # Write our custom URDF to a temporary file
-    urdf_text = generate_nao_left_arm_urdf(joint_angles, link_lengths)
+    urdf_text = generate_nao_full_urdf(joint_angles, link_lengths)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmp_file:
         tmp_file.write(urdf_text.encode("utf-8"))
         tmp_file_path = tmp_file.name
@@ -399,16 +454,27 @@ def simulate_pybullet(joint_angles, link_lengths):
     start_pos = [0, 0, 0.1]
     start_orientation = p.getQuaternionFromEuler([0, 0, 0])
     
+        # Right before loadURDF:
+    print("URDF path:", tmp_file_path)
+    print("Exists?", os.path.exists(tmp_file_path))
+    with open(tmp_file_path) as f:
+        print("First lines:\n", "\n".join(f.readlines()[:5]))
     # Load our custom NAO left arm URDF
     robotId = p.loadURDF(tmp_file_path, start_pos, start_orientation, useFixedBase=True)
-    
+    p.resetDebugVisualizerCamera(
+    cameraDistance=1000.0,      # how far back the camera is
+    cameraYaw=50.0,           # horizontal rotation (degrees)
+    cameraPitch=35.0,         # vertical rotation (degrees)
+    cameraTargetPosition=[0,0,0.1],  # what point it’s looking at
+    physicsClientId=physicsClient     # your client id
+    )
     # Set joint states for the first 5 joints (assumes the URDF joints are defined in order)
     num_joints = p.getNumJoints(robotId)
     for i in range(min(5, num_joints)):
         p.resetJointState(robotId, i, joint_angles[i])
     
     # Run the simulation for ~1 second (240 steps at 240Hz)
-    for _ in range(2400):
+    for _ in range(240000):
         p.stepSimulation()
         time.sleep(1./240.)
     
