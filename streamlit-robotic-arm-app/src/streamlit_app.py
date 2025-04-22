@@ -137,7 +137,11 @@ class PINNModel(tf.keras.Model):
             loss = loss_data + self.lambda_phys * loss_phys
         gradients = tape.gradient(loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        return {"loss": loss, "data_loss": loss_data, "phys_loss": loss_phys}
+        # update built-in metrics (e.g. mae)
+        self.compiled_metrics.update_state(y, y_pred)
+        metric_results = {m.name: m.result() for m in self.metrics}
+        # return losses plus metric values
+        return {"loss": loss, "data_loss": loss_data, "phys_loss": loss_phys, **metric_results}
     def get_config(self):
         config = super(PINNModel, self).get_config()
         config.update({
@@ -161,12 +165,12 @@ st.header("Dataset and Training")
 @st.cache_data(show_spinner=True)
 def load_data():
     # Update the paths as needed
-    df_LTrain_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_x.csv")
-    df_LTrain_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTrain_y.csv")
-    df_LVal_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_x.csv")
-    df_LVal_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LVal_y.csv")
-    df_LTest_x = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_x.csv")
-    df_LTest_y = pd.read_csv("c:/Users/Abiy/Desktop/DS Workshop final projects/IK/arkomadataset/LeftArmDataset/LTest_y.csv")
+    df_LTrain_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTrain_x.csv")
+    df_LTrain_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTrain_y.csv")
+    df_LVal_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LVal_x.csv")
+    df_LVal_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LVal_y.csv")
+    df_LTest_x = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTest_x.csv")
+    df_LTest_y = pd.read_csv("c:/Users/Abiy/Desktop/DSWorkshopfinalprojects/IK/arkomadataset/LeftArmDataset/LTest_y.csv")
     return df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y
 
 df_LTrain_x, df_LTrain_y, df_LVal_x, df_LVal_y, df_LTest_x, df_LTest_y = load_data()
@@ -323,6 +327,7 @@ def generate_nao_left_arm_urdf(joint_angles, link_lengths):
 """
     return urdf
 
+
 def simulate_pybullet_trajectory(trajectory, link_lengths):
     """
     Animate the NAO left arm in PyBullet along a given trajectory using motor control.
@@ -351,6 +356,14 @@ def simulate_pybullet_trajectory(trajectory, link_lengths):
     start_orientation = p.getQuaternionFromEuler([0, 0, 0])
     robotId = p.loadURDF(tmp_file_path, start_pos, start_orientation, useFixedBase=True)
     
+
+    p.resetDebugVisualizerCamera(
+    cameraDistance=5.0,      # how far back the camera is
+    cameraYaw=90.0,           # horizontal rotation (degrees)
+    cameraPitch=-40.0,         # vertical rotation (degrees)
+    cameraTargetPosition=[0,0,0.1],  # what point it’s looking at
+    physicsClientId=physicsClient     # your client id
+    )
     num_joints = p.getNumJoints(robotId)
     
     # Enable position control for joints
@@ -402,13 +415,20 @@ def simulate_pybullet(joint_angles, link_lengths):
     # Load our custom NAO left arm URDF
     robotId = p.loadURDF(tmp_file_path, start_pos, start_orientation, useFixedBase=True)
     
+    p.resetDebugVisualizerCamera(
+    cameraDistance=5.0,      # how far back the camera is
+    cameraYaw=90.0,           # horizontal rotation (degrees)
+    cameraPitch=-40.0,         # vertical rotation (degrees)
+    cameraTargetPosition=[0,0,0.1],  # what point it’s looking at
+    physicsClientId=physicsClient     # your client id
+    )
     # Set joint states for the first 5 joints (assumes the URDF joints are defined in order)
     num_joints = p.getNumJoints(robotId)
     for i in range(min(5, num_joints)):
         p.resetJointState(robotId, i, joint_angles[i])
     
     # Run the simulation for ~1 second (240 steps at 240Hz)
-    for _ in range(2400):
+    for _ in range(24000):
         p.stepSimulation()
         time.sleep(1./240.)
     
@@ -549,27 +569,49 @@ ax_fk.legend()
 st.pyplot(fig_fk)
 
 # --- Plot Training History ---
-if 'history' in locals():
-    fig1, ax = plt.subplots(1, 2, figsize=(12,5))
-    ax[0].plot(history.history['loss'], label='Train Loss')
-    ax[0].plot(history.history['val_loss'], label='Val Loss')
-    ax[0].set_title('Model Loss (MSE)')
-    ax[0].set_xlabel('Epoch')
-    ax[0].set_ylabel('Loss')
-    ax[0].legend()
-    
-    ax[1].plot(history.history['mae'], label='Train MAE')
-    ax[1].plot(history.history['val_mae'], label='Val MAE')
-    ax[1].set_title('Model Mean Absolute Error')
-    ax[1].set_xlabel('Epoch')
-    ax[1].set_ylabel('MAE')
-    ax[1].legend()
-    
-    # Save the plot as an image
-    plt.savefig("training_history.png")
-    st.pyplot(fig1)
-else:
-    st.image("training_history.png", caption="Training History (Loaded Model)")
+if model_type == "Neural Network":
+    if 'history' in locals():
+        fig1, ax = plt.subplots(1, 2, figsize=(12,5))
+        ax[0].plot(history.history['loss'], label='Train Loss')
+        ax[0].plot(history.history['val_loss'], label='Val Loss')
+        ax[0].set_title('Model Loss (MSE)')
+        ax[0].set_xlabel('Epoch')
+        ax[0].set_ylabel('Loss')
+        ax[0].legend()
+        
+        ax[1].plot(history.history['mae'], label='Train MAE')
+        ax[1].plot(history.history['val_mae'], label='Val MAE')
+        ax[1].set_title('Model Mean Absolute Error')
+        ax[1].set_xlabel('Epoch')
+        ax[1].set_ylabel('MAE')
+        ax[1].legend()
+        
+        plt.savefig("training_history.png")
+        st.pyplot(fig1)
+    else:
+        st.image("training_history.png", caption="Training History (Loaded Model)")
+
+elif model_type == "PINN":
+    if 'history_pinn' in locals():
+        fig2, ax = plt.subplots(1, 2, figsize=(12,5))
+        ax[0].plot(history_pinn.history['loss'], label='Train Loss')
+        ax[0].plot(history_pinn.history['val_loss'], label='Val Loss')
+        ax[0].set_title('PINN Model Loss')
+        ax[0].set_xlabel('Epoch')
+        ax[0].set_ylabel('Loss')
+        ax[0].legend()
+        
+        ax[1].plot(history_pinn.history['mae'], label='Train MAE')
+        ax[1].plot(history_pinn.history['val_mae'], label='Val MAE')
+        ax[1].set_title('PINN Mean Absolute Error')
+        ax[1].set_xlabel('Epoch')
+        ax[1].set_ylabel('MAE')
+        ax[1].legend()
+        
+        plt.savefig("training_history_pinn.png")
+        st.pyplot(fig2)
+    else:
+        st.image("training_history_pinn.png", caption="PINN Training History (Loaded Model)")
 
 # --- Create a sequence of NN predictions from test set ---
 num_frames_test = 100
