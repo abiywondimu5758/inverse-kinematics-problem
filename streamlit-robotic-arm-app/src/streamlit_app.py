@@ -14,7 +14,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout
 from sklearn.preprocessing import StandardScaler
-
+from keras_tuner import HyperModel, BayesianOptimization  # new
 
 # For pybullet
 import pybullet as p
@@ -159,6 +159,48 @@ class PINNModel(tf.keras.Model):
 @tf.keras.utils.register_keras_serializable(package="Custom", name="zero_loss")
 def zero_loss(y_true, y_pred):
     return tf.constant(0.0)
+
+# --- New: HyperModel for standard Neural Network ---
+class NNHyperModel(HyperModel):
+    def __init__(self, input_dim):
+        self.input_dim = input_dim
+    def build(self, hp):
+        model = Sequential()
+        # tunable number of layers
+        for i in range(hp.Int("num_layers", 2, 4)):
+            units = hp.Int(f"units_{i}", 32, 128, step=32)
+            if i == 0:
+                model.add(Dense(units, activation='relu', input_shape=(self.input_dim,)))
+            else:
+                model.add(Dense(units, activation='relu'))
+            if hp.Boolean(f"drop_{i}"):
+                rate = hp.Float(f"drop_rate_{i}", 0.1, 0.5, step=0.1)
+                model.add(Dropout(rate))
+        model.add(Dense(5, activation='linear'))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(
+                hp.Float("lr", 1e-4, 1e-2, sampling="log")
+            ),
+            loss='mse', metrics=['mae']
+        )
+        return model
+
+# --- New: HyperModel for PINN ---
+class PINNHyperModel(HyperModel):
+    def __init__(self, input_dim, link_lengths):
+        self.input_dim = input_dim
+        self.link_lengths = link_lengths
+    def build(self, hp):
+        lambda_phys = hp.Float("lambda_phys", 0.01, 1.0, sampling="log")
+        model = PINNModel(self.link_lengths, lambda_phys=lambda_phys)
+        model.build((None, self.input_dim))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(
+                hp.Float("pin_lr", 1e-4, 1e-2, sampling="log")
+            ),
+            loss=zero_loss, metrics=['mae']
+        )
+        return model
 
 # --- Load dataset ---
 st.header("Dataset and Training")
@@ -442,54 +484,76 @@ model_type = st.sidebar.selectbox("Select Model Type", ["Neural Network", "PINN"
 st.sidebar.header("Visualiser Selection")
 viz_mode = st.sidebar.selectbox("Select Visualization Mode", ["Matplotlib", "PyBullet"])
 
-# --- Build/Load Model ---
+# --- Build/Load/Tune Model ---
 if model_type == "Neural Network":
-    MODEL_PATH = "model_trained.h5"
+    MODEL_PATH = "nn_best_model.h5"
     if os.path.exists(MODEL_PATH):
-        model = load_model(MODEL_PATH, custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
-        st.success("Loaded saved Neural Network model.")
-    else:
-        st.subheader("Neural Network Model")
-        model = Sequential([
-            Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-            Dense(64, activation='relu'),
-            Dropout(0.2),
-            Dense(32, activation='relu'),
-            Dense(5, activation='linear')
-        ])
+        # load without compile to skip missing-mse issue, then compile manually
+        model = load_model(MODEL_PATH, compile=False)
         model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        model_summary = StringIO()
-        model.summary(print_fn=lambda x: model_summary.write(x + "\n"))
-        st.text(model_summary.getvalue())
-        st.info("Training Neural Network model... (this might take a while)")
-        history = model.fit(X_train_scaled, y_train_scaled,
-                            epochs=200, batch_size=64,
-                            validation_data=(X_val_scaled, y_val_scaled),
-                            shuffle=True, verbose=0)
+        st.success("Loaded and compiled saved NN model.")
+    else:
+        tuner = BayesianOptimization(
+            NNHyperModel(X_train_scaled.shape[1]),
+            objective='val_loss',
+            max_trials=10,
+            directory='kt_tuner', project_name='nn_bo'
+        )
+        st.info("Tuning NN hyperparameters...")
+        tuner.search(
+            X_train_scaled, y_train_scaled,
+            validation_data=(X_val_scaled, y_val_scaled),
+            epochs=30, batch_size=64, verbose=0
+        )
+        best_hps = tuner.get_best_hyperparameters(1)[0]
+        model = tuner.hypermodel.build(best_hps)
+        st.info("Training best NN model...")
+        history = model.fit(
+            X_train_scaled, y_train_scaled,
+            epochs=200, batch_size=64,
+            validation_data=(X_val_scaled, y_val_scaled),
+            verbose=0
+        )
         model.save(MODEL_PATH)
-        st.success("Neural Network training completed and model saved.")
+        st.success("Best NN model saved")
+
 else:  # PINN model selected
-    PINN_MODEL_PATH = "pinn_model.keras"  # use a '.keras' extension for native Keras format
-    if os.path.exists(PINN_MODEL_PATH):
-        model = load_model(PINN_MODEL_PATH,
-                           custom_objects={"PINNModel": PINNModel, "forward_kinematics_tf_5": forward_kinematics_tf_5},
-                           safe_mode=False)
+    MODEL_PATH = "pinn_best_model.keras"
+    if os.path.exists(MODEL_PATH):
+        model = load_model(
+            MODEL_PATH,
+            custom_objects={
+                "PINNModel": PINNModel,
+                "forward_kinematics_tf_5": forward_kinematics_tf_5,
+                "zero_loss": zero_loss
+            }
+        )
         st.success("Loaded saved PINN model.")
     else:
-        st.subheader("PINN Model Training")
-        # Define link lengths for 5-DOF arm
         link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]
-        model = PINNModel(link_lengths=link_lengths, lambda_phys=0.1)
-        model.build((None, X_train_scaled.shape[1]))  # Ensure model is built before training
-        model.compile(optimizer='adam', loss=zero_loss, metrics=['mae'])
-        st.info("Training PINN model... (this may take a while)")
-        history_pinn = model.fit(X_train_scaled, y_train_scaled,
-                                 epochs=200, batch_size=64,
-                                 validation_data=(X_val_scaled, y_val_scaled),
-                                 verbose=0)
-        model.save(PINN_MODEL_PATH)  # now saved with valid extension
-        st.success("PINN training completed and model saved.")
-
+        tuner = BayesianOptimization(
+            PINNHyperModel(X_train_scaled.shape[1], link_lengths),
+            objective='val_mae',
+            max_trials=10,
+            directory='kt_tuner', project_name='pinn_bo'
+        )
+        st.info("Tuning PINN hyperparameters...")
+        tuner.search(
+            X_train_scaled, y_train_scaled,
+            validation_data=(X_val_scaled, y_val_scaled),
+            epochs=30, batch_size=64, verbose=0
+        )
+        best_hps = tuner.get_best_hyperparameters(1)[0]
+        model = tuner.hypermodel.build(best_hps)
+        st.info("Training best PINN model...")
+        history_pinn = model.fit(
+            X_train_scaled, y_train_scaled,
+            epochs=200, batch_size=64,
+            validation_data=(X_val_scaled, y_val_scaled),
+            verbose=0
+        )
+        model.save(MODEL_PATH)
+        st.success("Best PINN model saved")
 
 # Insert common evaluation snippet for both model types
 if model_type == "PINN":
