@@ -23,6 +23,129 @@ import time
 import tempfile
 import os
 
+def generate_nao_left_arm_urdf(joint_angles, link_lengths):
+    """
+    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
+    The joints are assumed in order:
+      1. LShoulderPitch (rotation around z)
+      2. LShoulderRoll  (rotation around y)
+      3. LElbowYaw      (rotation around z)
+      4. LElbowRoll     (rotation around y)
+      5. LWristYaw      (rotation around z)
+    For simplicity, each link is represented by a small box.
+    
+    Parameters:
+        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
+        link_lengths: list/array of link lengths for each segment
+        
+    Returns:
+        A string containing the URDF.
+    """
+    # For simplicity, we use box geometry with a fixed size based on each link length
+    # You can refine the geometry details as needed.
+    urdf = """<?xml version="1.0" ?>
+<robot name="nao_left_arm">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+  </link>
+"""
+    # Joint 1: LShoulderPitch
+    urdf += f"""
+  <link name="LShoulderPitch_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[0]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderPitch_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="LShoulderPitch_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 2: LShoulderRoll
+    urdf += f"""
+  <link name="LShoulderRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[1]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderRoll_joint" type="revolute">
+    <parent link="LShoulderPitch_link"/>
+    <child link="LShoulderRoll_link"/>
+    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 3: LElbowYaw
+    urdf += f"""
+  <link name="LElbowYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[2]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowYaw_joint" type="revolute">
+    <parent link="LShoulderRoll_link"/>
+    <child link="LElbowYaw_link"/>
+    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 4: LElbowRoll
+    urdf += f"""
+  <link name="LElbowRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[3]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowRoll_joint" type="revolute">
+    <parent link="LElbowYaw_link"/>
+    <child link="LElbowRoll_link"/>
+    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 5: LWristYaw
+    urdf += f"""
+  <link name="LWristYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[4]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LWristYaw_joint" type="revolute">
+    <parent link="LElbowRoll_link"/>
+    <child link="LWristYaw_link"/>
+    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
+  </joint>
+</robot>
+"""
+    return urdf
 
 # --- Helper: forward kinematics ---
 def forward_kinematics(joint_angles, link_lengths):
@@ -616,8 +739,21 @@ if viz_mode == "Matplotlib":  # Only show Matplotlib animation when selected
                                   init_func=init, blit=True, interval=50)
     rc('animation', html='jshtml')
     ani_html = ani.to_jshtml()
-
     st.components.v1.html(ani_html, height=600)
+
+    # Save NN prediction animation as GIF
+    gif_path = "nn_simulation.gif"
+    ani.save(gif_path, writer="pillow", fps=20)
+    st.image(gif_path, caption="NN Simulation GIF", use_column_width=True)
+    # provide download link
+    with open(gif_path, "rb") as f:
+        st.download_button(
+            label="Download NN Simulation GIF",
+            data=f,
+            file_name="nn_simulation.gif",
+            mime="image/gif"
+        )
+
 
 # --- User Input Simulation via Streamlit ---
 with st.sidebar.form(key="simulation_form"):
@@ -679,11 +815,24 @@ if submit_sim:
             line_sim.set_3d_properties(zs)
             return (line_sim,)
         
-        ani_sim = animation.FuncAnimation(fig3, animate_sim, frames=num_frames_sim,
-                                        init_func=init_sim, blit=True, interval=50)
+        ani_sim = animation.FuncAnimation(fig3, animate_sim,
+                                          frames=num_frames_sim,
+                                          init_func=init_sim, blit=True, interval=50)
         ani_sim_html = ani_sim.to_jshtml()
         st.components.v1.html(ani_sim_html, height=600)
-        st.sidebar.text("Simulation completed successfully.")
+
+        # Save target‐trajectory animation as GIF
+        gif_sim_path = "target_simulation.gif"
+        ani_sim.save(gif_sim_path, writer="pillow", fps=20)
+        st.image(gif_sim_path, caption="Target Simulation GIF", use_column_width=True)
+        # provide download link
+        with open(gif_sim_path, "rb") as f:
+            st.download_button(
+                label="Download Target Simulation GIF",
+                data=f,
+                file_name="target_simulation.gif",
+                mime="image/gif"
+            )
 
     else:  # PyBullet visualization
         st.info("Running PyBullet simulation along the trajectory...")
@@ -786,126 +935,3 @@ if submit_sim:
 
 
 
-def generate_nao_left_arm_urdf(joint_angles, link_lengths):
-    """
-    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
-    The joints are assumed in order:
-      1. LShoulderPitch (rotation around z)
-      2. LShoulderRoll  (rotation around y)
-      3. LElbowYaw      (rotation around z)
-      4. LElbowRoll     (rotation around y)
-      5. LWristYaw      (rotation around z)
-    For simplicity, each link is represented by a small box.
-    
-    Parameters:
-        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
-        link_lengths: list/array of link lengths for each segment
-        
-    Returns:
-        A string containing the URDF.
-    """
-    # For simplicity, we use box geometry with a fixed size based on each link length
-    # You can refine the geometry details as needed.
-    urdf = """<?xml version="1.0" ?>
-<robot name="nao_left_arm">
-  <link name="base_link">
-    <visual>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-    </visual>
-  </link>
-"""
-    # Joint 1: LShoulderPitch
-    urdf += f"""
-  <link name="LShoulderPitch_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[0]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LShoulderPitch_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="LShoulderPitch_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 2: LShoulderRoll
-    urdf += f"""
-  <link name="LShoulderRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[1]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LShoulderRoll_joint" type="revolute">
-    <parent link="LShoulderPitch_link"/>
-    <child link="LShoulderRoll_link"/>
-    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 3: LElbowYaw
-    urdf += f"""
-  <link name="LElbowYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[2]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LElbowYaw_joint" type="revolute">
-    <parent link="LShoulderRoll_link"/>
-    <child link="LElbowYaw_link"/>
-    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 4: LElbowRoll
-    urdf += f"""
-  <link name="LElbowRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[3]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LElbowRoll_joint" type="revolute">
-    <parent link="LElbowYaw_link"/>
-    <child link="LElbowRoll_link"/>
-    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 5: LWristYaw
-    urdf += f"""
-  <link name="LWristYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[4]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LWristYaw_joint" type="revolute">
-    <parent link="LElbowRoll_link"/>
-    <child link="LWristYaw_link"/>
-    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
-  </joint>
-</robot>
-"""
-    return urdf
