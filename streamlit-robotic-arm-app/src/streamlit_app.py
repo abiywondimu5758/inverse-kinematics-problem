@@ -149,10 +149,14 @@ class PINNModel(tf.keras.Model):
             "lambda_phys": self.lambda_phys
         })
         return config
+
     @classmethod
     def from_config(cls, config):
+        # protect against None config during deserialization
+        if config is None:
+            config = {}
         link_lengths = config.pop("link_lengths", [1.0, 1.0, 0.8, 0.5, 0.3])
-        lambda_phys = config.pop("lambda_phys", 0.1)
+        lambda_phys   = config.pop("lambda_phys", 0.1)
         return cls(link_lengths, lambda_phys, **config)
 
 # New: Helper function for zero loss
