@@ -245,129 +245,7 @@ y_test_scaled = scaler_y.transform(y_test)
 st.write("Sample normalized input:", X_train_scaled[0])
 st.write("Sample normalized output:", y_train_scaled[0])
 
-def generate_nao_left_arm_urdf(joint_angles, link_lengths):
-    """
-    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
-    The joints are assumed in order:
-      1. LShoulderPitch (rotation around z)
-      2. LShoulderRoll  (rotation around y)
-      3. LElbowYaw      (rotation around z)
-      4. LElbowRoll     (rotation around y)
-      5. LWristYaw      (rotation around z)
-    For simplicity, each link is represented by a small box.
-    
-    Parameters:
-        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
-        link_lengths: list/array of link lengths for each segment
-        
-    Returns:
-        A string containing the URDF.
-    """
-    # For simplicity, we use box geometry with a fixed size based on each link length
-    # You can refine the geometry details as needed.
-    urdf = """<?xml version="1.0" ?>
-<robot name="nao_left_arm">
-  <link name="base_link">
-    <visual>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-    </visual>
-  </link>
-"""
-    # Joint 1: LShoulderPitch
-    urdf += f"""
-  <link name="LShoulderPitch_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[0]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LShoulderPitch_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="LShoulderPitch_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 2: LShoulderRoll
-    urdf += f"""
-  <link name="LShoulderRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[1]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LShoulderRoll_joint" type="revolute">
-    <parent link="LShoulderPitch_link"/>
-    <child link="LShoulderRoll_link"/>
-    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 3: LElbowYaw
-    urdf += f"""
-  <link name="LElbowYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[2]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LElbowYaw_joint" type="revolute">
-    <parent link="LShoulderRoll_link"/>
-    <child link="LElbowYaw_link"/>
-    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 4: LElbowRoll
-    urdf += f"""
-  <link name="LElbowRoll_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[3]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LElbowRoll_joint" type="revolute">
-    <parent link="LElbowYaw_link"/>
-    <child link="LElbowRoll_link"/>
-    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
-  </joint>
-"""
-    # Joint 5: LWristYaw
-    urdf += f"""
-  <link name="LWristYaw_link">
-    <visual>
-      <geometry>
-        <box size="0.05 0.05 {link_lengths[4]}"/>
-      </geometry>
-      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
-    </visual>
-  </link>
-  <joint name="LWristYaw_joint" type="revolute">
-    <parent link="LElbowRoll_link"/>
-    <child link="LWristYaw_link"/>
-    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
-  </joint>
-</robot>
-"""
-    return urdf
+
 
 
 def simulate_pybullet_trajectory(trajectory, link_lengths):
@@ -506,6 +384,9 @@ if model_type == "Neural Network":
             epochs=30, batch_size=64, verbose=0
         )
         best_hps = tuner.get_best_hyperparameters(1)[0]
+        st.write("Best Hyperparameters for Neural Network:")
+        for param, value in best_hps.values.items():
+            st.write(f"{param}: {value}")
         model = tuner.hypermodel.build(best_hps)
         st.info("Training best NN model...")
         history = model.fit(
@@ -544,6 +425,9 @@ else:  # PINN model selected
             epochs=30, batch_size=64, verbose=0
         )
         best_hps = tuner.get_best_hyperparameters(1)[0]
+        st.write("Best Hyperparameters for PINN:")
+        for param, value in best_hps.values.items():
+            st.write(f"{param}: {value}")
         model = tuner.hypermodel.build(best_hps)
         st.info("Training best PINN model...")
         history_pinn = model.fit(
@@ -803,95 +687,221 @@ if submit_sim:
     st.sidebar.text("Simulation completed successfully.")
 
 
-# --- Tkinter Simulation Code (Launch if desired) ---
-def simulate_tkinter():
-    import tkinter as tk
-    from mpl_toolkits.mplot3d import Axes3D  # Ensure 3D plotting
+# # --- Tkinter Simulation Code (Launch if desired) ---
+# def simulate_tkinter():
+#     import tkinter as tk
+#     from mpl_toolkits.mplot3d import Axes3D  # Ensure 3D plotting
     
-    def simulate():
-        try:
-            x_val = float(entry_x.get())
-            y_val = float(entry_y.get())
-            z_val = float(entry_z.get())
-            roll_val = float(entry_roll.get())
-            pitch_val = float(entry_pitch.get())
-            yaw_val = float(entry_yaw.get())
-        except ValueError:
-            print("Please enter valid numbers.")
-            return
+#     def simulate():
+#         try:
+#             x_val = float(entry_x.get())
+#             y_val = float(entry_y.get())
+#             z_val = float(entry_z.get())
+#             roll_val = float(entry_roll.get())
+#             pitch_val = float(entry_pitch.get())
+#             yaw_val = float(entry_yaw.get())
+#         except ValueError:
+#             print("Please enter valid numbers.")
+#             return
         
-        target_input = np.array([[x_val, y_val, z_val, roll_val, pitch_val, yaw_val]])
-        target_input_scaled = scaler_X.transform(target_input)
-        pred_scaled = model.predict(target_input_scaled, verbose=0)
-        pred = scaler_y.inverse_transform(pred_scaled)[0]
-        target_joint_angles = pred[:5]  # Updated to use five joints
-        print("Predicted joint angles:", target_joint_angles)
-        start_joint_angles = np.zeros(5)  # Updated to five joints
-        num_frames_local = 50
-        trajectory = np.linspace(start_joint_angles, target_joint_angles, num_frames_local)
+#         target_input = np.array([[x_val, y_val, z_val, roll_val, pitch_val, yaw_val]])
+#         target_input_scaled = scaler_X.transform(target_input)
+#         pred_scaled = model.predict(target_input_scaled, verbose=0)
+#         pred = scaler_y.inverse_transform(pred_scaled)[0]
+#         target_joint_angles = pred[:5]  # Updated to use five joints
+#         print("Predicted joint angles:", target_joint_angles)
+#         start_joint_angles = np.zeros(5)  # Updated to five joints
+#         num_frames_local = 50
+#         trajectory = np.linspace(start_joint_angles, target_joint_angles, num_frames_local)
         
-        fig_local = plt.figure()
-        ax_local = fig_local.add_subplot(111, projection='3d')
-        ax_local.set_xlim([-3, 3])
-        ax_local.set_ylim([-3, 3])
-        ax_local.set_zlim([-1, 3])
-        ax_local.set_xlabel('X')
-        ax_local.set_ylabel('Y')
-        ax_local.set_zlabel('Z')
-        ax_local.set_title("Robotic Arm Animation to Target (Tkinter)")
-        line_local, = ax_local.plot([], [], [], 'o-', lw=4)
+#         fig_local = plt.figure()
+#         ax_local = fig_local.add_subplot(111, projection='3d')
+#         ax_local.set_xlim([-3, 3])
+#         ax_local.set_ylim([-3, 3])
+#         ax_local.set_zlim([-1, 3])
+#         ax_local.set_xlabel('X')
+#         ax_local.set_ylabel('Y')
+#         ax_local.set_zlabel('Z')
+#         ax_local.set_title("Robotic Arm Animation to Target (Tkinter)")
+#         line_local, = ax_local.plot([], [], [], 'o-', lw=4)
 
-        def init_local():
-            line_local.set_data([], [])
-            line_local.set_3d_properties([])
-            return (line_local,)
+#         def init_local():
+#             line_local.set_data([], [])
+#             line_local.set_3d_properties([])
+#             return (line_local,)
 
-        def animate_local(i):
-            joint_angles = trajectory[i]
-            positions = forward_kinematics(joint_angles, link_lengths)
-            xs = positions[:, 0]
-            ys = positions[:, 1]
-            zs = positions[:, 2]
-            line_local.set_data(xs, ys)
-            line_local.set_3d_properties(zs)
-            return (line_local,)
+#         def animate_local(i):
+#             joint_angles = trajectory[i]
+#             positions = forward_kinematics(joint_angles, link_lengths)
+#             xs = positions[:, 0]
+#             ys = positions[:, 1]
+#             zs = positions[:, 2]
+#             line_local.set_data(xs, ys)
+#             line_local.set_3d_properties(zs)
+#             return (line_local,)
 
-        ani_local = animation.FuncAnimation(fig_local, animate_local, frames=num_frames_local,
-                                            init_func=init_local, blit=True, interval=50)
-        plt.show()
+#         ani_local = animation.FuncAnimation(fig_local, animate_local, frames=num_frames_local,
+#                                             init_func=init_local, blit=True, interval=50)
+#         plt.show()
     
-    root = tk.Tk()
-    root.title("Robotic Arm Simulation Input (Tkinter)")
+#     root = tk.Tk()
+#     root.title("Robotic Arm Simulation Input (Tkinter)")
     
-    tk.Label(root, text="X:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
-    entry_x = tk.Entry(root)
-    entry_x.grid(row=0, column=1, padx=5, pady=5)
+#     tk.Label(root, text="X:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
+#     entry_x = tk.Entry(root)
+#     entry_x.grid(row=0, column=1, padx=5, pady=5)
     
-    tk.Label(root, text="Y:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
-    entry_y = tk.Entry(root)
-    entry_y.grid(row=1, column=1, padx=5, pady=5)
+#     tk.Label(root, text="Y:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
+#     entry_y = tk.Entry(root)
+#     entry_y.grid(row=1, column=1, padx=5, pady=5)
     
-    tk.Label(root, text="Z:").grid(row=2, column=0, padx=5, pady=5, sticky='e')
-    entry_z = tk.Entry(root)
-    entry_z.grid(row=2, column=1, padx=5, pady=5)
+#     tk.Label(root, text="Z:").grid(row=2, column=0, padx=5, pady=5, sticky='e')
+#     entry_z = tk.Entry(root)
+#     entry_z.grid(row=2, column=1, padx=5, pady=5)
     
-    tk.Label(root, text="Roll:").grid(row=3, column=0, padx=5, pady=5, sticky='e')
-    entry_roll = tk.Entry(root)
-    entry_roll.grid(row=3, column=1, padx=5, pady=5)
+#     tk.Label(root, text="Roll:").grid(row=3, column=0, padx=5, pady=5, sticky='e')
+#     entry_roll = tk.Entry(root)
+#     entry_roll.grid(row=3, column=1, padx=5, pady=5)
     
-    tk.Label(root, text="Pitch:").grid(row=4, column=0, padx=5, pady=5, sticky='e')
-    entry_pitch = tk.Entry(root)
-    entry_pitch.grid(row=4, column=1, padx=5, pady=5)
+#     tk.Label(root, text="Pitch:").grid(row=4, column=0, padx=5, pady=5, sticky='e')
+#     entry_pitch = tk.Entry(root)
+#     entry_pitch.grid(row=4, column=1, padx=5, pady=5)
     
-    tk.Label(root, text="Yaw:").grid(row=5, column=0, padx=5, pady=5, sticky='e')
-    entry_yaw = tk.Entry(root)
-    entry_yaw.grid(row=5, column=1, padx=5, pady=5)
+#     tk.Label(root, text="Yaw:").grid(row=5, column=0, padx=5, pady=5, sticky='e')
+#     entry_yaw = tk.Entry(root)
+#     entry_yaw.grid(row=5, column=1, padx=5, pady=5)
     
-    simulate_button = tk.Button(root, text="Simulate", command=simulate)
-    simulate_button.grid(row=6, column=0, columnspan=2, padx=5, pady=10)
+#     simulate_button = tk.Button(root, text="Simulate", command=simulate)
+#     simulate_button.grid(row=6, column=0, columnspan=2, padx=5, pady=10)
     
-    root.mainloop()
+#     root.mainloop()
 
-if st.sidebar.button("Launch Tkinter Simulation"):
-    st.sidebar.info("Launching Tkinter simulation in a new window.")
-    simulate_tkinter()
+# if st.sidebar.button("Launch Tkinter Simulation"):
+#     st.sidebar.info("Launching Tkinter simulation in a new window.")
+#     simulate_tkinter()
+
+
+
+def generate_nao_left_arm_urdf(joint_angles, link_lengths):
+    """
+    Generate a simplified URDF string for the NAO robot left arm with 5 joints.
+    The joints are assumed in order:
+      1. LShoulderPitch (rotation around z)
+      2. LShoulderRoll  (rotation around y)
+      3. LElbowYaw      (rotation around z)
+      4. LElbowRoll     (rotation around y)
+      5. LWristYaw      (rotation around z)
+    For simplicity, each link is represented by a small box.
+    
+    Parameters:
+        joint_angles: list/array of joint angles (not used in URDF, but can be used to set initial states)
+        link_lengths: list/array of link lengths for each segment
+        
+    Returns:
+        A string containing the URDF.
+    """
+    # For simplicity, we use box geometry with a fixed size based on each link length
+    # You can refine the geometry details as needed.
+    urdf = """<?xml version="1.0" ?>
+<robot name="nao_left_arm">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+  </link>
+"""
+    # Joint 1: LShoulderPitch
+    urdf += f"""
+  <link name="LShoulderPitch_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[0]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[0]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderPitch_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="LShoulderPitch_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 2: LShoulderRoll
+    urdf += f"""
+  <link name="LShoulderRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[1]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[1]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderRoll_joint" type="revolute">
+    <parent link="LShoulderPitch_link"/>
+    <child link="LShoulderRoll_link"/>
+    <origin xyz="0 0 {link_lengths[0]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 3: LElbowYaw
+    urdf += f"""
+  <link name="LElbowYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[2]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[2]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowYaw_joint" type="revolute">
+    <parent link="LShoulderRoll_link"/>
+    <child link="LElbowYaw_link"/>
+    <origin xyz="0 0 {link_lengths[1]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 4: LElbowRoll
+    urdf += f"""
+  <link name="LElbowRoll_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[3]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[3]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowRoll_joint" type="revolute">
+    <parent link="LElbowYaw_link"/>
+    <child link="LElbowRoll_link"/>
+    <origin xyz="0 0 {link_lengths[2]}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
+  </joint>
+"""
+    # Joint 5: LWristYaw
+    urdf += f"""
+  <link name="LWristYaw_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 {link_lengths[4]}"/>
+      </geometry>
+      <origin xyz="0 0 {link_lengths[4]/2}" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LWristYaw_joint" type="revolute">
+    <parent link="LElbowRoll_link"/>
+    <child link="LWristYaw_link"/>
+    <origin xyz="0 0 {link_lengths[3]}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
+  </joint>
+</robot>
+"""
+    return urdf
