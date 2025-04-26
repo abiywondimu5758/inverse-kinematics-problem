@@ -1,0 +1,80 @@
+<?xml version="1.0" ?>
+<robot name="nao_left_arm">
+  <link name="base_link">
+    <visual>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+  </link>
+
+  <link name="LShoulderPitch_link">
+    <visual>
+      <geometry><box size="0.05 0.05 1"/></geometry>
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderPitch_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="LShoulderPitch_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+
+  <link name="LShoulderRoll_link">
+    <visual>
+      <geometry><box size="0.05 0.05 1"/></geometry>
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LShoulderRoll_joint" type="revolute">
+    <parent link="LShoulderPitch_link"/>
+    <child link="LShoulderRoll_link"/>
+    <origin xyz="0 0 1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.3142" upper="1.3265" effort="20" velocity="1.0"/>
+  </joint>
+
+  <link name="LElbowYaw_link">
+    <visual>
+      <geometry><box size="0.05 0.05 0.8"/></geometry>
+      <origin xyz="0 0 0.4" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowYaw_joint" type="revolute">
+    <parent link="LShoulderRoll_link"/>
+    <child link="LElbowYaw_link"/>
+    <origin xyz="0 0 1" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.0857" upper="2.0857" effort="20" velocity="1.0"/>
+  </joint>
+
+  <link name="LElbowRoll_link">
+    <visual>
+      <geometry><box size="0.05 0.05 0.5"/></geometry>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LElbowRoll_joint" type="revolute">
+    <parent link="LElbowYaw_link"/>
+    <child link="LElbowRoll_link"/>
+    <origin xyz="0 0 0.8" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5621" upper="0.0" effort="20" velocity="1.0"/>
+  </joint>
+
+  <link name="LWristYaw_link">
+    <visual>
+      <geometry><box size="0.05 0.05 0.3"/></geometry>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="LWristYaw_joint" type="revolute">
+    <parent link="LElbowRoll_link"/>
+    <child link="LWristYaw_link"/>
+    <origin xyz="0 0 0.5" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.8238" upper="1.8238" effort="20" velocity="1.0"/>
+  </joint>
+
+</robot>
