@@ -705,7 +705,7 @@ st.write("NN-generated angles sequence shape:", angles_sequence_nn.shape)
 
 # --- Animation using NN predictions ---
 if viz_mode == "Matplotlib":  # Only show Matplotlib animation when selected
-    st.subheader("Robotic Arm Simulation with PINN Predictions")
+    st.subheader("Robotic Arm Simulation with NN Predictions")
     link_lengths = [1.0, 1.0, 0.8, 0.5, 0.3]  # Updated to five links
 
     fig2 = plt.figure()
@@ -716,7 +716,7 @@ if viz_mode == "Matplotlib":  # Only show Matplotlib animation when selected
     ax2.set_xlabel('X')
     ax2.set_ylabel('Y')
     ax2.set_zlabel('Z')
-    ax2.set_title("Robotic Arm Simulation with PINN Predictions")
+    ax2.set_title("Robotic Arm Simulation with NN Predictions")
 
     line, = ax2.plot([], [], [], 'o-', lw=4)
 
