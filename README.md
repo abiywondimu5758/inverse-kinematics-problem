@@ -87,6 +87,10 @@ IK/
 - **Missing modules**: re-run `pip install -r requirements.txt`.
 - **Long training**: adjust `epochs` or reduce data size.
 
+## Acknowledgments
+We gratefully acknowledge the creators and maintainers of the LeftArmDataset from the Arkomadataset project, which made this work possible.  
+Dataset repository: https://github.com/arkomadataset/LeftArmDataset
+
 ---
 
 Enjoy exploring inverse kinematics with this interactive app!
